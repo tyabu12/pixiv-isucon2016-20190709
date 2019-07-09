@@ -2,46 +2,61 @@
 
 
 [[projects]]
+  digest = "1:14522f9a914cb3eccbd95e2f2298a99fa82795aaf49f765daf9f17f12ef3bc59"
   name = "github.com/bradfitz/gomemcache"
   packages = ["memcache"]
+  pruneopts = ""
   revision = "4faecadd4f695d18a912ba110120fcfd460aca98"
 
 [[projects]]
+  digest = "1:76d8037f44300221417b21b6636618d4e0954b9585ae98c703c1518a05cf8dfb"
   name = "github.com/bradleypeabody/gorilla-sessions-memcache"
   packages = ["."]
+  pruneopts = ""
   revision = "88ee8d4815fec038f22ce295cffa0165820fc2b8"
 
 [[projects]]
+  digest = "1:471ff9656d1af39fe694760eeb789022c0b197d7f8e5739bcf1466e6d74fc5b2"
   name = "github.com/go-sql-driver/mysql"
   packages = ["."]
+  pruneopts = ""
   revision = "66312f7fe2678aa0f5ec770f96702f4c4ec5aa8e"
 
 [[projects]]
+  digest = "1:dbbeb8ddb0be949954c8157ee8439c2adfd8dc1c9510eb44a6e58cb68c3dce28"
   name = "github.com/gorilla/context"
   packages = ["."]
+  pruneopts = ""
   revision = "08b5f424b9271eedf6f9f0ce86cb9396ed337a42"
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:51a1d17ba9fe6648d9fdd5b822baa616d6ec7f28c8669c2091126d206796b5ae"
   name = "github.com/gorilla/securecookie"
   packages = ["."]
+  pruneopts = ""
   revision = "e59506cc896acb7f7bf732d4fdf5e25f7ccd8983"
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:9b559e5d4f114297ad10714541dda013da5664c6c6317e32cc62995b8faa81bf"
   name = "github.com/gorilla/sessions"
   packages = ["."]
+  pruneopts = ""
   revision = "8cd570d8b4ed84b18bca9d8c3ae2db55885ccd8b"
 
 [[projects]]
+  digest = "1:dc52929285faca8e53cb0ade12ebb5eac7214818c25124b3946b89310086bd5f"
   name = "github.com/jmoiron/sqlx"
   packages = [
     ".",
-    "reflectx"
+    "reflectx",
   ]
+  pruneopts = ""
   revision = "05b81a7d5d38058e42148dc01f17daf4acba4640"
 
 [[projects]]
+  digest = "1:dea0f532f687e24a4b8c15a774d87a1e50465b6dbd9b9dcb323f23dc9f15bf4d"
   name = "github.com/zenazn/goji"
   packages = [
     ".",
@@ -50,13 +65,22 @@
     "graceful/listener",
     "web",
     "web/middleware",
-    "web/mutil"
+    "web/mutil",
   ]
+  pruneopts = ""
   revision = "1925ec6302925f4760d7a11cc17036f44ec98d5b"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1a076e1cb73939facf84fc6329e602400e80faa8643167ee6ef305eb4a665c82"
+  input-imports = [
+    "github.com/bradfitz/gomemcache/memcache",
+    "github.com/bradleypeabody/gorilla-sessions-memcache",
+    "github.com/go-sql-driver/mysql",
+    "github.com/gorilla/sessions",
+    "github.com/jmoiron/sqlx",
+    "github.com/zenazn/goji",
+    "github.com/zenazn/goji/web",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1
