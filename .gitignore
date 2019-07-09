@@ -13,3 +13,5 @@ vendor/
 /portal/log/*
 !/portal/log/.keep
 /portal/tmp
+
+/scripts/src
