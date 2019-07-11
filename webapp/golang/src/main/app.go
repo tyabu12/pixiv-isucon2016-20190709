@@ -3,6 +3,7 @@ package main
 import (
 	crand "crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -28,8 +29,9 @@ import (
 )
 
 var (
-	db    *sqlx.DB
-	store *gsm.MemcacheStore
+	db             *sqlx.DB
+	memcacheClient *memcache.Client
+	store          *gsm.MemcacheStore
 )
 
 const (
@@ -73,11 +75,19 @@ type Comment struct {
 }
 
 func init() {
-	memcacheClient := memcache.New("localhost:11211")
+	memcacheClient = memcache.New("localhost:11211")
 	store = gsm.NewMemcacheStore(memcacheClient, "isucogram_", []byte("sendagaya"))
 }
 
 func dbInitialize() {
+	uids := []int{}
+	err := db.Get(&uids, "SELECT id FROM users WHERE id > 1000")
+	if err != nil {
+		for _, uid := range uids {
+			deleteUserCache(uid)
+		}
+	}
+
 	sqls := []string{
 		"DELETE FROM users WHERE id > 1000",
 		"DELETE FROM posts WHERE id > 10000",
@@ -150,18 +160,15 @@ func getSession(r *http.Request) *sessions.Session {
 
 func getSessionUser(r *http.Request) User {
 	session := getSession(r)
-	uid, ok := session.Values["user_id"]
-	if !ok || uid == nil {
+	value, ok := session.Values["user_id"]
+	if !ok || value == nil {
 		return User{}
 	}
-
-	u := User{}
-
-	err := db.Get(&u, "SELECT * FROM `users` WHERE `id` = ?", uid)
+	uid := value.(int)
+	u, err := getUser(uid)
 	if err != nil {
 		return User{}
 	}
-
 	return u
 }
 
@@ -176,6 +183,41 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 		session.Save(r, w)
 		return value.(string)
 	}
+}
+
+func getUserCacheKey(uid int) string {
+	return "user:" + strconv.Itoa(uid)
+}
+
+func deleteUserCache(uid int) {
+	memcacheClient.Delete(getUserCacheKey(uid))
+}
+
+func getUser(uid int) (User, error) {
+	u := User{}
+	key := getUserCacheKey(uid)
+
+	item, err := memcacheClient.Get(key)
+	if err == nil {
+		err = json.Unmarshal(item.Value, &u)
+		if err != nil {
+			panic(fmt.Sprintf("error user unmarshal (ID: %d): %s\n", uid, err.Error()))
+		}
+		return u, nil
+	}
+	fmt.Printf("error reading user (ID: %d) from %s", uid, err.Error())
+
+	err = db.Get(&u, "SELECT * FROM `users` WHERE `id` = ?", uid)
+	if err != nil {
+		return User{}, nil
+	}
+
+	userMarshaled, err := json.Marshal(&u)
+	if err == nil {
+		memcacheClient.Set(&memcache.Item{Key: key, Value: userMarshaled})
+	}
+
+	return u, nil
 }
 
 func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, error) {
@@ -198,7 +240,8 @@ func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, erro
 		}
 
 		for i := 0; i < len(comments); i++ {
-			uerr := db.Get(&comments[i].User, "SELECT * FROM `users` WHERE `id` = ?", comments[i].UserID)
+			var uerr error
+			comments[i].User, uerr = getUser(comments[i].UserID)
 			if uerr != nil {
 				return nil, uerr
 			}
@@ -211,7 +254,8 @@ func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, erro
 
 		p.Comments = comments
 
-		perr := db.Get(&p.User, "SELECT * FROM `users` WHERE `id` = ?", p.UserID)
+		var perr error
+		p.User, perr = getUser(p.UserID)
 		if perr != nil {
 			return nil, perr
 		}
@@ -372,7 +416,7 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(lerr.Error())
 		return
 	}
-	session.Values["user_id"] = uid
+	session.Values["user_id"] = int(uid)
 	session.Values["csrf_token"] = secureRandomStr(16)
 	session.Save(r, w)
 
@@ -767,6 +811,10 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	for _, id := range r.Form["uid[]"] {
 		db.Exec(query, 1, id)
+		uid, err := strconv.Atoi(id)
+		if err != nil {
+			deleteUserCache(uid)
+		}
 	}
 
 	http.Redirect(w, r, "/admin/banned", http.StatusFound)
