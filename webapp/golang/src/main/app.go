@@ -35,6 +35,7 @@ var (
 	db             *sqlx.DB
 	memcacheClient *memcache.Client
 	store          *gsm.MemcacheStore
+	userMtx        sync.Mutex
 	postMtx        sync.Mutex
 	commentMtx     sync.Mutex
 )
@@ -221,6 +222,9 @@ func getUsers(uids []int) (map[int]User, error) {
 		keys = append(keys, getUserCacheKey(uid))
 	}
 
+	userMtx.Lock()
+	defer userMtx.Unlock()
+
 	items, err := memcacheClient.GetMulti(keys)
 	if items == nil && err != nil {
 		fmt.Printf("error reading users from %s\n", err.Error())
@@ -261,6 +265,27 @@ func getUsers(uids []int) (map[int]User, error) {
 	}
 
 	return users, nil
+}
+
+func appendUser(accountName string, passhash string) (int, error) {
+	u := User{AccountName: accountName, Passhash: passhash, Authority: 0, DelFlg: 0, CreatedAt: time.Now()}
+	userMtx.Lock()
+	defer userMtx.Unlock()
+	result, err := db.Exec("INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)", u.AccountName, u.Passhash)
+	if err != nil {
+		return -1, err
+	}
+	uid, err := result.LastInsertId()
+	if err != nil {
+		return -1, err
+	}
+	u.ID = int(uid)
+	userMarshaled, err := json.Marshal(&u)
+	if err != nil {
+		return -1, err
+	}
+	memcacheClient.Set(&memcache.Item{Key: getUserCacheKey(u.ID), Value: userMarshaled})
+	return u.ID, nil
 }
 
 func getCommentsCacheKey(pid int) string {
@@ -500,20 +525,13 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := "INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)"
-	result, eerr := db.Exec(query, accountName, calculatePasshash(accountName, password))
-	if eerr != nil {
-		fmt.Println("error: " + eerr.Error())
-		return
-	}
-
 	session := getSession(r)
-	uid, lerr := result.LastInsertId()
+	uid, lerr := appendUser(accountName, calculatePasshash(accountName, password))
 	if lerr != nil {
 		fmt.Println("error: " + lerr.Error())
 		return
 	}
-	session.Values["user_id"] = int(uid)
+	session.Values["user_id"] = uid
 	session.Values["csrf_token"] = secureRandomStr(16)
 	session.Save(r, w)
 
