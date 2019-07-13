@@ -87,7 +87,7 @@ func dbInitialize() {
 	uids := []int{}
 	if err := db.Select(&uids, "SELECT id FROM users WHERE id > 1000"); err == nil {
 		for _, uid := range uids {
-			deleteUserCache(uid)
+			memcacheClient.Delete(getUserCacheKey(uid))
 		}
 	}
 
@@ -208,8 +208,8 @@ func getUserCacheKey(uid int) string {
 	return "user:" + strconv.Itoa(uid)
 }
 
-func deleteUserCache(uid int) {
-	memcacheClient.Delete(getUserCacheKey(uid))
+func getCommentsCacheKey(pid int) string {
+	return "comments:" + strconv.Itoa(pid)
 }
 
 func getUser(uid int) (User, error) {
@@ -239,23 +239,45 @@ func getUser(uid int) (User, error) {
 	return u, nil
 }
 
+func getComments(pid int) ([]Comment, error) {
+	comments := []Comment{}
+	key := getCommentsCacheKey(pid)
+
+	item, err := memcacheClient.Get(key)
+	if err == nil {
+		err = json.Unmarshal(item.Value, &comments)
+		if err != nil {
+			panic(fmt.Sprintf("error comments unmarshal (ID: %d): %s\n", pid, err.Error()))
+		}
+		return comments, nil
+	}
+	fmt.Printf("error reading comments (ID: %d) from %s", pid, err.Error())
+
+	err = db.Select(&comments, "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at`", pid)
+	if err != nil {
+		return nil, err
+	}
+
+	commentsMarshaled, err := json.Marshal(&comments)
+	if err == nil {
+		memcacheClient.Set(&memcache.Item{Key: key, Value: commentsMarshaled})
+	}
+
+	return comments, nil
+}
+
 func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, error) {
 	var posts []Post
 
 	for _, p := range results {
-		err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
+		comments, err := getComments(p.ID)
 		if err != nil {
 			return nil, err
 		}
 
-		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at`"
-		if !allComments {
-			query += " LIMIT 3"
-		}
-		var comments []Comment
-		cerr := db.Select(&comments, query, p.ID)
-		if cerr != nil {
-			return nil, cerr
+		p.CommentCount = len(comments)
+		if !allComments && p.CommentCount > 3 {
+			comments = comments[:3]
 		}
 
 		for i := 0; i < len(comments); i++ {
@@ -771,6 +793,8 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
 	db.Exec(query, postID, me.ID, r.FormValue("comment"))
 
+	memcacheClient.Delete(getCommentsCacheKey(postID))
+
 	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
 }
 
@@ -827,7 +851,7 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 		db.Exec(query, 1, id)
 		uid, err := strconv.Atoi(id)
 		if err != nil {
-			deleteUserCache(uid)
+			memcacheClient.Delete(getUserCacheKey(uid))
 		}
 	}
 
