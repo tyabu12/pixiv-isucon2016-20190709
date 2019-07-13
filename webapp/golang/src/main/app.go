@@ -184,10 +184,13 @@ func getSessionUser(r *http.Request) User {
 		return User{}
 	}
 	uid := value.(int)
-	u, err := getUser(uid)
+	users, err := getUsers([]int{uid})
+	fmt.Printf("uid: %d, users: %#v\n", uid, users)
 	if err != nil {
+		panic(err)
 		return User{}
 	}
+	u, _ := users[uid]
 	return u
 }
 
@@ -208,35 +211,58 @@ func getUserCacheKey(uid int) string {
 	return "user:" + strconv.Itoa(uid)
 }
 
-func getCommentsCacheKey(pid int) string {
-	return "comments:" + strconv.Itoa(pid)
+func getUsers(uids []int) (map[int]User, error) {
+	users := make(map[int]User)
+
+	keys := []string{}
+	for _, uid := range uids {
+		keys = append(keys, getUserCacheKey(uid))
+	}
+
+	items, err := memcacheClient.GetMulti(keys)
+	if items == nil && err != nil {
+		fmt.Printf("error reading users from %s\n", err.Error())
+	}
+
+	missUids := []int{}
+	for _, uid := range uids {
+		key := getUserCacheKey(uid)
+		item, ok := items[key]
+		if ok {
+			u := User{}
+			err = json.Unmarshal(item.Value, &u)
+			if err != nil {
+				panic(fmt.Sprintf("error user unmarshal " + err.Error()))
+			}
+			users[uid] = u
+		} else {
+			missUids = append(missUids, uid)
+		}
+	}
+
+	if len(missUids) > 0 {
+		q, vs, err := sqlx.In("SELECT * FROM `users` WHERE `id` IN (?)", missUids)
+		if err != nil {
+			panic("sqlx.In " + err.Error())
+		}
+		missUsers := []User{}
+		err = db.Select(&missUsers, q, vs...)
+		for _, u := range missUsers {
+			users[u.ID] = u
+			key := getUserCacheKey(u.ID)
+			userMarshaled, err := json.Marshal(&u)
+			if err != nil {
+				panic("userMarshaled: " + err.Error())
+			}
+			memcacheClient.Set(&memcache.Item{Key: key, Value: userMarshaled})
+		}
+	}
+
+	return users, nil
 }
 
-func getUser(uid int) (User, error) {
-	u := User{}
-	key := getUserCacheKey(uid)
-
-	item, err := memcacheClient.Get(key)
-	if err == nil {
-		err = json.Unmarshal(item.Value, &u)
-		if err != nil {
-			panic(fmt.Sprintf("error user unmarshal (ID: %d): %s\n", uid, err.Error()))
-		}
-		return u, nil
-	}
-	fmt.Printf("error reading user (ID: %d) from %s", uid, err.Error())
-
-	err = db.Get(&u, "SELECT * FROM `users` WHERE `id` = ?", uid)
-	if err != nil {
-		return User{}, nil
-	}
-
-	userMarshaled, err := json.Marshal(&u)
-	if err == nil {
-		memcacheClient.Set(&memcache.Item{Key: key, Value: userMarshaled})
-	}
-
-	return u, nil
+func getCommentsCacheKey(pid int) string {
+	return "comments:" + strconv.Itoa(pid)
 }
 
 func getComments(pid int) ([]Comment, error) {
@@ -251,7 +277,7 @@ func getComments(pid int) ([]Comment, error) {
 		}
 		return comments, nil
 	}
-	fmt.Printf("error reading comments (ID: %d) from %s", pid, err.Error())
+	fmt.Printf("error reading comments (ID: %d) from %s\n", pid, err.Error())
 
 	err = db.Select(&comments, "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at`", pid)
 	if err != nil {
@@ -280,22 +306,20 @@ func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, erro
 			comments = comments[:3]
 		}
 
+		uids := []int{p.UserID}
 		for i := 0; i < len(comments); i++ {
-			var uerr error
-			comments[i].User, uerr = getUser(comments[i].UserID)
-			if uerr != nil {
-				return nil, uerr
-			}
+			uids = append(uids, comments[i].UserID)
+		}
+		users, err := getUsers(uids)
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(comments); i++ {
+			comments[i].User, _ = users[comments[i].UserID]
 		}
 
 		p.Comments = comments
-
-		var perr error
-		p.User, perr = getUser(p.UserID)
-		if perr != nil {
-			return nil, perr
-		}
-
+		p.User, _ = users[p.UserID]
 		p.CSRFToken = CSRFToken
 
 		if p.User.DelFlg == 0 {
