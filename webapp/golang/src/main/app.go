@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -34,6 +35,7 @@ var (
 	db             *sqlx.DB
 	memcacheClient *memcache.Client
 	store          *gsm.MemcacheStore
+	postMtx        sync.Mutex
 )
 
 const (
@@ -496,8 +498,9 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
 
 	results := []Post{}
-
+	postMtx.Lock()
 	err := db.Select(&results, "SELECT `posts`.`id`, `user_id`, `body`, `mime`, `posts`.`created_at` FROM `posts` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `del_flg` = 0) ORDER BY `created_at` DESC LIMIT ?", postsPerPage)
+	postMtx.Unlock()
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -541,8 +544,9 @@ func getAccountName(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-
+	postMtx.Lock()
 	rerr := db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?", user.ID, postsPerPage)
+	postMtx.Unlock()
 	if rerr != nil {
 		fmt.Println(rerr)
 		return
@@ -562,7 +566,9 @@ func getAccountName(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 
 	postIDs := []int{}
+	postMtx.Lock()
 	perr := db.Select(&postIDs, "SELECT `id` FROM `posts` WHERE `user_id` = ?", user.ID)
+	postMtx.Unlock()
 	if perr != nil {
 		fmt.Println(perr)
 		return
@@ -630,7 +636,9 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
+	postMtx.Lock()
 	rerr := db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `del_flg` = 0) AND `created_at` <= ? ORDER BY `created_at` DESC LIMIT ?", t.Format(ISO8601_FORMAT), postsPerPage)
+	postMtx.Unlock()
 	if rerr != nil {
 		fmt.Println(rerr)
 		return
@@ -665,7 +673,9 @@ func getPostsID(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
+	postMtx.Lock()
 	rerr := db.Select(&results, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	postMtx.Unlock()
 	if rerr != nil {
 		fmt.Println(rerr)
 		return
@@ -759,6 +769,9 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+
+	postMtx.Lock()
+	defer postMtx.Unlock()
 
 	query := "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)"
 	result, eerr := db.Exec(
