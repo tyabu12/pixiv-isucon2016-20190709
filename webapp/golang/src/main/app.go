@@ -76,6 +76,7 @@ type Comment struct {
 
 func init() {
 	memcacheClient = memcache.New("localhost:11211")
+	memcacheClient.Timeout = 300 * time.Millisecond
 	store = gsm.NewMemcacheStore(memcacheClient, "isucogram_", []byte("sendagaya"))
 }
 
