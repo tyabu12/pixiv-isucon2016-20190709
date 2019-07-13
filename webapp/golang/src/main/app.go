@@ -425,14 +425,14 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 	query := "INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)"
 	result, eerr := db.Exec(query, accountName, calculatePasshash(accountName, password))
 	if eerr != nil {
-		fmt.Println(eerr.Error())
+		fmt.Println("error: " + eerr.Error())
 		return
 	}
 
 	session := getSession(r)
 	uid, lerr := result.LastInsertId()
 	if lerr != nil {
-		fmt.Println(lerr.Error())
+		fmt.Println("error: " + lerr.Error())
 		return
 	}
 	session.Values["user_id"] = int(uid)
@@ -707,7 +707,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 
 	filedata, rerr := ioutil.ReadAll(file)
 	if rerr != nil {
-		fmt.Println(rerr.Error())
+		fmt.Println("error: " + rerr.Error())
 	}
 
 	if len(filedata) > UploadLimit {
@@ -728,27 +728,28 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("body"),
 	)
 	if eerr != nil {
-		fmt.Println(eerr.Error())
+		fmt.Println("error: " + eerr.Error())
 		return
 	}
 
 	pid, lerr := result.LastInsertId()
 	if lerr != nil {
-		fmt.Println(lerr.Error())
+		fmt.Println("error: " + lerr.Error())
 		return
 	}
 
 	f, err := os.Create(PostsImageDir + strconv.FormatInt(pid, 10) + ext)
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("error: " + err.Error())
 		return
 	}
-	defer f.Close()
 	_, err = f.Write(filedata)
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("error: " + err.Error())
 		return
 	}
+	f.Close()
+	fmt.Println("debug: image/" + PostsImageDir + strconv.FormatInt(pid, 10) + ext)
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 	return
