@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ var (
 
 const (
 	postsPerPage   = 20
+	PostsImageDir  = "/home/isucon/private_isu/webapp/public/image/"
 	ISO8601_FORMAT = "2006-01-02T15:04:05-07:00"
 	UploadLimit    = 10 * 1024 * 1024 // 10mb
 
@@ -83,10 +85,31 @@ func init() {
 
 func dbInitialize() {
 	uids := []int{}
-	err := db.Get(&uids, "SELECT id FROM users WHERE id > 1000")
-	if err != nil {
+	if err := db.Select(&uids, "SELECT id FROM users WHERE id > 1000"); err == nil {
 		for _, uid := range uids {
 			deleteUserCache(uid)
+		}
+	}
+
+	if files, err := filepath.Glob(PostsImageDir + "[1-9][0-9][0-9][0-9][0-9].*"); err == nil {
+		for _, f := range files {
+			slashIndex := strings.LastIndex(f, "/")
+			dotIndex := strings.LastIndex(f, ".")
+			if slashIndex < 0 {
+				slashIndex = 0
+			} else {
+				slashIndex++
+			}
+			if dotIndex < 0 {
+				continue
+			}
+			pid, err := strconv.Atoi(f[slashIndex:dotIndex])
+			if err != nil {
+				continue
+			}
+			if pid > 10000 {
+				os.Remove(f)
+			}
 		}
 	}
 
@@ -721,8 +744,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Create("/home/isucon/private_isu/webapp/public/image/" +
-		strconv.FormatInt(pid, 10) + ext)
+	f, err := os.Create(PostsImageDir + strconv.FormatInt(pid, 10) + ext)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
