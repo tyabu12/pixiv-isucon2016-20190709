@@ -36,6 +36,7 @@ var (
 	memcacheClient *memcache.Client
 	store          *gsm.MemcacheStore
 	postMtx        sync.Mutex
+	commentMtx     sync.Mutex
 )
 
 const (
@@ -187,7 +188,6 @@ func getSessionUser(r *http.Request) User {
 	}
 	uid := value.(int)
 	users, err := getUsers([]int{uid})
-	fmt.Printf("uid: %d, users: %#v\n", uid, users)
 	if err != nil {
 		panic(err)
 		return User{}
@@ -271,6 +271,8 @@ func getComments(pid int) ([]Comment, error) {
 	comments := []Comment{}
 	key := getCommentsCacheKey(pid)
 
+	commentMtx.Lock()
+	defer commentMtx.Unlock()
 	item, err := memcacheClient.Get(key)
 	if err == nil {
 		err = json.Unmarshal(item.Value, &comments)
@@ -292,6 +294,39 @@ func getComments(pid int) ([]Comment, error) {
 	}
 
 	return comments, nil
+}
+
+func appendComment(postID int, user *User, comment string) error {
+	c := Comment{PostID: postID, UserID: user.ID, Comment: comment, CreatedAt: time.Now(), User: *user}
+	key := getCommentsCacheKey(postID)
+	comments := []Comment{}
+
+	commentMtx.Lock()
+	defer commentMtx.Unlock()
+	result, err := db.Exec("INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)", c.PostID, c.UserID, c.Comment)
+	if err != nil {
+		return err
+	}
+	item, err := memcacheClient.Get(key)
+	if err != nil {
+		return nil
+	}
+	err = json.Unmarshal(item.Value, &comments)
+	if err != nil {
+		return err
+	}
+	cid, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	c.ID = int(cid)
+	comments = append(comments, c)
+	commentsMarshaled, err := json.Marshal(&comments)
+	if err != nil {
+		return err
+	}
+	memcacheClient.Set(&memcache.Item{Key: key, Value: commentsMarshaled})
+	return nil
 }
 
 func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, error) {
@@ -793,6 +828,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f, err := os.Create(PostsImageDir + strconv.FormatInt(pid, 10) + ext)
+	defer f.Close()
 	if err != nil {
 		fmt.Println("error: " + err.Error())
 		return
@@ -802,8 +838,6 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("error: " + err.Error())
 		return
 	}
-	f.Close()
-	fmt.Println("debug: image/" + PostsImageDir + strconv.FormatInt(pid, 10) + ext)
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 	return
@@ -827,10 +861,11 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
-	db.Exec(query, postID, me.ID, r.FormValue("comment"))
-
-	memcacheClient.Delete(getCommentsCacheKey(postID))
+	err := appendComment(postID, &me, r.FormValue("comment"))
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
 }
