@@ -156,19 +156,19 @@ func resetCaches() {
 	resetCommentCache()
 }
 
-func tryLogin(accountName, password string) *User {
+func tryLogin(accountName, password string) int {
 	u := User{}
-	err := db.Get(&u, "SELECT * FROM users WHERE account_name = ? AND del_flg = 0", accountName)
+	err := db.Get(&u, "SELECT id, account_name, passhash FROM users WHERE account_name = ? AND del_flg = 0", accountName)
 	if err != nil {
-		return nil
+		return -1
 	}
 
 	if &u != nil && calculatePasshash(u.AccountName, password) == u.Passhash {
-		return &u
+		return u.ID
 	} else if &u == nil {
-		return nil
+		return -1
 	} else {
-		return nil
+		return -1
 	}
 }
 
@@ -566,11 +566,11 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u := tryLogin(r.FormValue("account_name"), r.FormValue("password"))
+	userID := tryLogin(r.FormValue("account_name"), r.FormValue("password"))
 
-	if u != nil {
+	if userID >= 0 {
 		session := getSession(r)
-		session.Values["user_id"] = u.ID
+		session.Values["user_id"] = userID
 		session.Values["csrf_token"] = secureRandomStr(16)
 		session.Save(r, w)
 
