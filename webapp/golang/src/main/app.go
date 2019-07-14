@@ -88,13 +88,6 @@ func init() {
 }
 
 func dbInitialize() {
-	uids := []int{}
-	if err := db.Select(&uids, "SELECT id FROM users WHERE id > 1000"); err == nil {
-		for _, uid := range uids {
-			memcacheClient.Delete(getUserCacheKey(uid))
-		}
-	}
-
 	if files, err := filepath.Glob(PostsImageDir + "[1-9][0-9][0-9][0-9][0-9].*"); err == nil {
 		for _, f := range files {
 			slashIndex := strings.LastIndex(f, "/")
@@ -128,6 +121,14 @@ func dbInitialize() {
 	for _, sql := range sqls {
 		db.Exec(sql)
 	}
+
+	resetCaches()
+}
+
+func resetCaches() {
+	memcacheClient.DeleteAll()
+	resetUserCache()
+	resetCommentCache()
 }
 
 func tryLogin(accountName, password string) *User {
@@ -288,6 +289,22 @@ func appendUser(accountName string, passhash string) (int, error) {
 	return u.ID, nil
 }
 
+func resetUserCache() {
+	users := []User{}
+	err := db.Select(&users, "SELECT * FROM `users`")
+	if err != nil {
+		panic("error with SELECT * FROM `users`: " + err.Error())
+	}
+	for _, u := range users {
+		key := getUserCacheKey(u.ID)
+		userMarshaled, err := json.Marshal(&u)
+		if err != nil {
+			panic("userMarshaled: " + err.Error())
+		}
+		memcacheClient.Set(&memcache.Item{Key: key, Value: userMarshaled})
+	}
+}
+
 func getCommentsCacheKey(pid int) string {
 	return "comments:" + strconv.Itoa(pid)
 }
@@ -352,6 +369,17 @@ func appendComment(postID int, user *User, comment string) error {
 	}
 	memcacheClient.Set(&memcache.Item{Key: key, Value: commentsMarshaled})
 	return nil
+}
+
+func resetCommentCache() {
+	postIDs := []int{}
+	err := db.Select(&postIDs, "SELECT id FROM `posts`")
+	if err != nil {
+		panic("error with SELECT id FROM `posts`: " + err.Error())
+	}
+	for _, postID := range postIDs {
+		getComments(postID)
+	}
 }
 
 func makePosts(results []Post, CSRFToken string, allComments bool) ([]Post, error) {
