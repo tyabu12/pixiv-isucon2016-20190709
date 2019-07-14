@@ -87,8 +87,9 @@ type Comment struct {
 }
 
 func init() {
-	memcacheClient = memcache.New("localhost:11211")
+	memcacheClient = memcache.New("/tmp/memcached.sock")
 	memcacheClient.Timeout = 300 * time.Millisecond
+	memcacheClient.DeleteAll()
 	store = gsm.NewMemcacheStore(memcacheClient, "isucogram_", []byte("sendagaya"))
 
 	fmap := template.FuncMap{
@@ -151,7 +152,6 @@ func dbInitialize() {
 }
 
 func resetCaches() {
-	memcacheClient.DeleteAll()
 	resetUserCache()
 	resetCommentCache()
 }
