@@ -268,6 +268,30 @@ func getUsers(uids []int) (map[int]User, error) {
 	return users, nil
 }
 
+func banUserOnCache(userID int) {
+	u := User{}
+	key := getUserCacheKey(userID)
+
+	userMtx.Lock()
+	defer userMtx.Unlock()
+
+	item, err := memcacheClient.Get(key)
+	if err != nil {
+		return
+	}
+	err = json.Unmarshal(item.Value, &u)
+	if err != nil {
+		panic(fmt.Sprintf("error user unmarshal (ID: %d): %s\n", userID, err.Error()))
+	}
+	u.DelFlg = 1
+	userMarshaled, err := json.Marshal(&u)
+	if err != nil {
+		panic(fmt.Sprintf("error user marshal (ID: %d): %s\n", userID, err.Error()))
+		return
+	}
+	memcacheClient.Set(&memcache.Item{Key: key, Value: userMarshaled})
+}
+
 func appendUser(accountName string, passhash string) (int, error) {
 	u := User{AccountName: accountName, Passhash: passhash, Authority: 0, DelFlg: 0, CreatedAt: time.Now()}
 	userMtx.Lock()
@@ -1011,7 +1035,9 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 		db.Exec(query, 1, id)
 		uid, err := strconv.Atoi(id)
 		if err != nil {
-			memcacheClient.Delete(getUserCacheKey(uid))
+			go func() {
+				banUserOnCache(uid)
+			}()
 		}
 	}
 
