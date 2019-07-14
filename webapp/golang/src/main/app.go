@@ -1052,17 +1052,9 @@ func main() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 
-	host := os.Getenv("ISUCONP_DB_HOST")
-	if host == "" {
-		host = "localhost"
-	}
-	port := os.Getenv("ISUCONP_DB_PORT")
-	if port == "" {
-		port = "3306"
-	}
-	_, err := strconv.Atoi(port)
-	if err != nil {
-		log.Fatalf("Failed to read DB port number from an environment variable ISUCONP_DB_PORT.\nError: %s", err.Error())
+	socket := os.Getenv("ISUCONP_DB_UNIX")
+	if socket == "" {
+		socket = "/var/run/mysqld/mysqld.sock"
 	}
 	user := os.Getenv("ISUCONP_DB_USER")
 	if user == "" {
@@ -1075,15 +1067,14 @@ func main() {
 	}
 
 	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
+		"%s:%s@unix(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
 		user,
 		password,
-		host,
-		port,
+		socket,
 		dbname,
 	)
 
-	db, err = sqlx.Open("mysql", dsn)
+	db, err := sqlx.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
