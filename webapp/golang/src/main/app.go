@@ -41,10 +41,10 @@ var (
 )
 
 const (
-	postsPerPage   = 20
-	PostsImageDir  = "/home/isucon/private_isu/webapp/public/image/"
-	ISO8601_FORMAT = "2006-01-02T15:04:05-07:00"
-	UploadLimit    = 10 * 1024 * 1024 // 10mb
+	postsPerPage         = 20
+	PostsImageDir        = "/home/isucon/private_isu/webapp/public/image/"
+	ISO8601_FORMAT       = "2006-01-02T15:04:05-07:00"
+	UploadLimit    int64 = 10 * 1024 * 1024 // 10mb
 
 	// CSRF Token error
 	StatusUnprocessableEntity = 422
@@ -351,7 +351,7 @@ func getComments(pid int) ([]Comment, error) {
 		}
 		return comments, nil
 	}
-	fmt.Printf("error reading comments (ID: %d) from %s\n", pid, err.Error())
+	// fmt.Printf("error reading comments (ID: %d) from %s\n", pid, err.Error())
 
 	err = db.Select(&comments, "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at`", pid)
 	if err != nil {
@@ -862,12 +862,12 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	filedata, rerr := ioutil.ReadAll(file)
-	if rerr != nil {
-		fmt.Println("error: " + rerr.Error())
+	fileSize, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		fmt.Println("error: " + err.Error())
+		return
 	}
-
-	if len(filedata) > UploadLimit {
+	if fileSize > UploadLimit {
 		session := getSession(r)
 		session.Values["notice"] = "ファイルサイズが大きすぎます"
 		session.Save(r, w)
@@ -875,6 +875,24 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+
+	tempFile, err := ioutil.TempFile(PostsImageDir, "tmp-")
+	if err != nil {
+		fmt.Println("error: " + err.Error())
+		return
+	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		fmt.Println("error: " + err.Error())
+		tempFile.Close()
+		return
+	}
+	if _, err := io.Copy(tempFile, file); err != nil {
+		fmt.Println("error: " + err.Error())
+		tempFile.Close()
+		return
+	}
+	tempFileName := tempFile.Name()
+	tempFile.Close()
 
 	postMtx.Lock()
 	defer postMtx.Unlock()
@@ -898,14 +916,11 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Create(PostsImageDir + strconv.FormatInt(pid, 10) + ext)
-	defer f.Close()
-	if err != nil {
+	if err = os.Chmod(tempFileName, 0666); err != nil {
 		fmt.Println("error: " + err.Error())
 		return
 	}
-	_, err = f.Write(filedata)
-	if err != nil {
+	if err = os.Rename(tempFileName, PostsImageDir+strconv.FormatInt(pid, 10)+ext); err != nil {
 		fmt.Println("error: " + err.Error())
 		return
 	}
