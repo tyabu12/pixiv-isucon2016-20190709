@@ -35,9 +35,14 @@ var (
 	db             *sqlx.DB
 	memcacheClient *memcache.Client
 	store          *gsm.MemcacheStore
-	userMtx        sync.Mutex
-	postMtx        sync.Mutex
-	commentMtx     sync.Mutex
+
+	userMtx    sync.Mutex
+	postMtx    sync.Mutex
+	commentMtx sync.Mutex
+
+	indexTemplate       *template.Template
+	postsTemplate       *template.Template
+	accountNameTemplate *template.Template
 )
 
 const (
@@ -85,6 +90,26 @@ func init() {
 	memcacheClient = memcache.New("localhost:11211")
 	memcacheClient.Timeout = 300 * time.Millisecond
 	store = gsm.NewMemcacheStore(memcacheClient, "isucogram_", []byte("sendagaya"))
+
+	fmap := template.FuncMap{
+		"imageURL": imageURL,
+	}
+	indexTemplate = template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
+		getTemplPath("layout.html"),
+		getTemplPath("index.html"),
+		getTemplPath("posts.html"),
+		getTemplPath("post.html"),
+	))
+	postsTemplate = template.Must(template.New("posts.html").Funcs(fmap).ParseFiles(
+		getTemplPath("posts.html"),
+		getTemplPath("post.html"),
+	))
+	accountNameTemplate = template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
+		getTemplPath("layout.html"),
+		getTemplPath("user.html"),
+		getTemplPath("posts.html"),
+		getTemplPath("post.html"),
+	))
 }
 
 func dbInitialize() {
@@ -642,16 +667,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmap := template.FuncMap{
-		"imageURL": imageURL,
-	}
-
-	template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("index.html"),
-		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
-	)).Execute(w, struct {
+	indexTemplate.Execute(w, struct {
 		Posts     []Post
 		Me        User
 		CSRFToken string
@@ -727,17 +743,7 @@ func getAccountName(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 
 	me := getSessionUser(r)
-
-	fmap := template.FuncMap{
-		"imageURL": imageURL,
-	}
-
-	template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("user.html"),
-		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
-	)).Execute(w, struct {
+	accountNameTemplate.Execute(w, struct {
 		Posts          []Post
 		User           User
 		PostCount      int
@@ -785,14 +791,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmap := template.FuncMap{
-		"imageURL": imageURL,
-	}
-
-	template.Must(template.New("posts.html").Funcs(fmap).ParseFiles(
-		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
-	)).Execute(w, posts)
+	postsTemplate.Execute(w, posts)
 }
 
 func getPostsID(c web.C, w http.ResponseWriter, r *http.Request) {
