@@ -305,6 +305,34 @@ func resetUserCache() {
 	}
 }
 
+func getIndexPostsCacheKey() string {
+	return "indexPosts"
+}
+
+func getIndexPosts() ([]Post, error) {
+	posts := []Post{}
+	key := getIndexPostsCacheKey()
+	postMtx.Lock()
+	defer postMtx.Unlock()
+	item, err := memcacheClient.Get(key)
+	if err == nil {
+		err = json.Unmarshal(item.Value, &posts)
+		if err != nil {
+			panic(fmt.Sprintf("error indexPosts unmarshal: %s\n", err.Error()))
+		}
+		return posts, nil
+	}
+	err = db.Select(&posts, "SELECT `posts`.`id`, `user_id`, `body`, `mime`, `posts`.`created_at` FROM `posts` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `del_flg` = 0) ORDER BY `created_at` DESC LIMIT ?", postsPerPage)
+	if err != nil {
+		return nil, err
+	}
+	postsMarshaled, err := json.Marshal(&posts)
+	if err == nil {
+		memcacheClient.Set(&memcache.Item{Key: key, Value: postsMarshaled})
+	}
+	return posts, nil
+}
+
 func getCommentsCacheKey(pid int) string {
 	return "comments:" + strconv.Itoa(pid)
 }
@@ -578,10 +606,7 @@ func getLogout(w http.ResponseWriter, r *http.Request) {
 func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
 
-	results := []Post{}
-	postMtx.Lock()
-	err := db.Select(&results, "SELECT `posts`.`id`, `user_id`, `body`, `mime`, `posts`.`created_at` FROM `posts` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `del_flg` = 0) ORDER BY `created_at` DESC LIMIT ?", postsPerPage)
-	postMtx.Unlock()
+	results, err := getIndexPosts()
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -885,6 +910,8 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	memcacheClient.Delete(getIndexPostsCacheKey())
+
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 	return
 }
@@ -972,6 +999,10 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 			memcacheClient.Delete(getUserCacheKey(uid))
 		}
 	}
+
+	postMtx.Lock()
+	memcacheClient.Delete(getIndexPostsCacheKey())
+	postMtx.Unlock()
 
 	http.Redirect(w, r, "/admin/banned", http.StatusFound)
 }
