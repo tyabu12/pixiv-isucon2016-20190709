@@ -10,6 +10,7 @@ sudo nginx -t
 sudo nginx -s reload
 
 sudo systemctl restart mysql
+sudo systemctl restart memcached
 sudo systemctl restart isu-go
 
 ./clear_logs.sh
